@@ -1,0 +1,171 @@
+import numpy as np
+import scipy.stats as stats
+from sklearn.metrics import r2_score
+import matplotlib.pyplot as plt
+from IPython.display import display
+
+# =====================================================================
+# 1. CONSTANTES DEL MODELO Y GEOMETRÍA CÚBICA (2√3 α)
+# =====================================================================
+L0 = 29.0                      # Da (CHO)
+ALPHA = 0.007297352569         # Constante de estructura fina (α)
+K_GEOMETRICO = 2 * np.sqrt(3)  # 2√3 ≈ 3.464101615 (Diagonales del volumen cúbico)
+A = np.exp(K_GEOMETRICO * ALPHA) # Constante A ≈ 1.0256037
+
+# Nombre o etiqueta para el reporte y los gráficos
+NOMBRE_TAXON = "POACEAE"
+
+# =====================================================================
+# 2. INSERCIÓN MANUAL DE DATOS (Escribe o pega aquí tus masas)
+# =====================================================================
+# Puedes copiar tus valores numéricos separados por comas:
+masas_manuales = ( [
+715.26, 1720.59, 504.17, 930.31, 1206.39, 1074.35, 828.27, 678.22, 942.31, 312.11, 474.16, 810.26, 678.22, 1234.43, 1338.43, 1338.43, 1074.35, 504.17, 1396.49, 1206.39, 1074.35, 1074.35, 1206.39, 1074.35, 1152.38, 1206.39, 7370.29, 1074.35, 768.25, 1391.51, 942.31, 488.17, 1866.6, 678.22, 1396.49, 1470.48, 810.26, 1074.35, 1042.37, 986.3, 1448.53, 894.33, 608.22, 590.17, 546.18, 504.17, 604.19, 1026.38, 1206.39, 504.17, 942.31, 1074.35, 864.32, 810.26, 650.23, 620.22, 1056.39, 504.17, 1245.45, 1338.43, 1882.64, 1074.35, 942.31, 414.14, 666.22, 1206.39, 1448.53, 810.26, 476.17, 1206.39, 504.17, 1558.54, 666.22, 666.22, 810.26, 942.31, 678.22, 942.31, 732.28, 1338.43, 1245.45, 678.22, 1118.34, 910.33, 546.18, 722.21, 414.14, 666.22, 546.18, 1074.35, 1206.39, 590.17, 1188.43, 342.12, 414.14, 1074.35, 942.31, 810.26, 1206.39, 942.31, 810.26, 546.18, 546.18, 2044.7, 1234.43, 458.13, 1074.35, 1206.39, 546.18, 678.22, 1338.43, 546.18, 1245.45, 416.15, 990.33, 910.33, 504.17, 1558.54, 1206.39, 828.27, 282.1, 546.18, 504.17, 2044.7, 894.33, 810.26, 678.22, 414.14, 342.12, 546.18, 666.22, 282.1, 1338.43, 666.22, 1152.38
+] )
+
+    
+
+# Convertir a array de NumPy y filtrar posibles valores no válidos (<= L0)
+M_real = np.array(masas_manuales, dtype=float)
+M_real = M_real[~np.isnan(M_real)]
+M_real = M_real[M_real > L0]
+N = len(M_real)
+
+if N == 0:
+    raise ValueError("❌ La lista de masas está vacía o contiene valores menores a L0 (29 Da).")
+
+# =====================================================================
+# 3. EVALUACIÓN ESTADÍSTICA BÁSICA Y AJUSTE DEL MODELO
+# =====================================================================
+# Cálculo de números cuánticos q y predicciones
+q_exact = np.log(M_real / L0) / np.log(A)
+q_int = np.round(q_exact)
+M_pred = L0 * (A ** q_int)
+
+# Errores porcentuales absolutos
+errores = np.abs(M_real - M_pred) / M_real * 100
+
+# Métricas descriptivas
+mean_err = np.mean(errores)
+median_err = np.median(errores)
+std_err = np.std(errores)
+max_err = np.max(errores)
+min_err = np.min(errores)
+muestras_tol = np.sum(errores <= 5)
+pct_tol = (muestras_tol / N) * 100
+
+# Coeficiente de determinación R²
+r2 = r2_score(M_real, M_pred) if N > 1 else 1.0
+
+# Test Kolmogorov-Smirnov (Uniformidad de residuos q)
+residuos_KS = q_exact - np.floor(q_exact)
+ks_stat, p_val_ks = stats.kstest(residuos_KS, 'uniform')
+
+# Test de Escalabilidad (Pearson Error vs Masa)
+pearson_corr, p_val_pearson = stats.pearsonr(errores, M_real) if N > 1 else (0.0, 1.0)
+
+# =====================================================================
+# 4. MÉTRICAS AVANZADAS (ENTROPÍA, HHI Y BOOTSTRAP)
+# =====================================================================
+# Ocupación de nodos q discretos
+q_nodos = q_int.astype(int)
+_, counts = np.unique(q_nodos, return_counts=True)
+p_nodos = counts / N
+
+# Entropía de Shannon y HHI
+entropia_shannon = -np.sum(p_nodos * np.log2(p_nodos))
+max_entropia = np.log2(N) if N > 1 else 1.0
+entropia_norm = entropia_shannon / max_entropia if max_entropia > 0 else 0
+hhi = np.sum((p_nodos * 100) ** 2)
+
+# Bootstrap (2000 iteraciones con reemplazo)
+boot_ks = []
+boot_pearson = []
+np.random.seed(42)
+
+for _ in range(2000):
+    indices = np.random.choice(N, size=N, replace=True)
+    M_b = M_real[indices]
+    
+    q_ex_b = np.log(M_b / L0) / np.log(A)
+    res_b = q_ex_b - np.floor(q_ex_b)
+    stat_b, _ = stats.kstest(res_b, 'uniform')
+    boot_ks.append(stat_b)
+    
+    q_in_b = np.round(q_ex_b)
+    M_pr_b = L0 * (A ** q_in_b)
+    err_b = np.abs(M_b - M_pr_b) / M_b * 100
+    r_b, _ = stats.pearsonr(err_b, M_b) if N > 1 else 0.0
+    boot_pearson.append(r_b)
+
+ci_ks = np.percentile(boot_ks, [2.5, 97.5])
+ci_pearson = np.percentile(boot_pearson, [2.5, 97.5])
+
+# =====================================================================
+# 5. REPORTE DE RESULTADOS EN CONSOLA
+# =====================================================================
+print("="*65)
+print(f" RESULTADOS DEL MODELO N* CON DENSIDAD GEOMÉTRICA (2√3 α)")
+print(f" Dataset: {NOMBRE_TAXON} (N = {N} muestras ingresadas manualmente)")
+print("="*65)
+print(" Basic Statistics:")
+print(f"  Mean error:            {mean_err:.2f}%")
+print(f"  Median error:          {median_err:.2f}%")
+print(f"  Std deviation:         {std_err:.2f}%")
+print(f"  Maximum error:         {max_err:.2f}%")
+print(f"  Minimum error:         {min_err:.2f}%")
+print(f"  Samples <= 5% error:   {muestras_tol}/{N} ({pct_tol:.2f}%)")
+print("\n Model Fit:")
+print(f"  R² (linear):           {r2:.4f}")
+print("\n Residual Uniformity Test (Kolmogorov-Smirnov):")
+print(f"  KS Statistic:          {ks_stat:.4f}")
+print(f"  P-value:               {p_val_ks:.4f}")
+print("\n Scalability Test (Error vs. Mass):")
+print(f"  Pearson correlation:   {pearson_corr:.4f}")
+print(f"  P-value:               {p_val_pearson:.4f}")
+print("\n Information Architecture & Robustness:")
+print(f"  Shannon Entropy (Raw): {entropia_shannon:.4f} bits")
+print(f"  Normalized Entropy:    {entropia_norm:.4f} (0 = Orden, 1 = Desorden)")
+print(f"  Herfindahl-Hirschman:  {hhi:.2f} / 10000")
+print(f"  Bootstrap KS 95% CI:   [{ci_ks[0]:.4f}, {ci_ks[1]:.4f}]")
+print(f"  Bootstrap Pearson CI:  [{ci_pearson[0]:.4f}, {ci_pearson[1]:.4f}]")
+print("="*65 + "\n")
+
+# =====================================================================
+# 6. GENERACIÓN Y VISUALIZACIÓN DE FIGURAS
+# =====================================================================
+# Fig 1: Histograma de Errores
+plt.figure(figsize=(7, 4))
+plt.hist(errores, bins=15, color='steelblue', edgecolor='black', alpha=0.8)
+plt.axvline(mean_err, color='red', linestyle='--', label=f'Mean: {mean_err:.2f}%')
+plt.title(f'Errors Histogram - {NOMBRE_TAXON}', fontsize=11, fontweight='bold')
+plt.xlabel('Relative Error (%)')
+plt.ylabel('Frecuency')
+plt.grid(True, linestyle=':', alpha=0.6)
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+# Fig 2: Test de Escalabilidad (Masa vs Error)
+plt.figure(figsize=(7, 4))
+plt.scatter(M_real, errores, color='darkorange', alpha=0.7, edgecolor='k', s=35)
+plt.title(f'Scalability Test - {NOMBRE_TAXON}', fontsize=11, fontweight='bold')
+plt.xlabel('Molecular Mass (Da)')
+plt.ylabel('Relative Error (%)')
+plt.grid(True, linestyle=':', alpha=0.6)
+plt.tight_layout()
+plt.show()
+
+# Fig 3: Perfil de Selección S(M)
+masas_bin = np.round(M_real / 2) * 2
+uniques_bin, counts_bin = np.unique(masas_bin, return_counts=True)
+sm_perfil = counts_bin / np.max(counts_bin)
+
+plt.figure(figsize=(9, 4))
+plt.plot(uniques_bin, sm_perfil, marker='o', color='teal', linestyle='-', linewidth=1.2, markersize=4)
+plt.title(f'Selection Profile S(M) in Mass Space - {NOMBRE_TAXON}', fontsize=11, fontweight='bold')
+plt.xlabel(' Molecular Mass Region (Da)')
+plt.ylabel('S(M) [Normalized]')
+plt.grid(True, linestyle=':', alpha=0.6)
+plt.tight_layout()
+plt.show()
